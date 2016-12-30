@@ -1,6 +1,8 @@
 package scalikejdbc.streams
 
-import scalikejdbc.{ DBConnectionAttributesWiredResultSet, DBSession, WithExtractor }
+import java.sql.ResultSet
+
+import scalikejdbc._
 
 abstract class StreamingInvoker[A, E <: WithExtractor] {
   protected[this] def streamingSql: StreamingSQL[A, E]
@@ -10,13 +12,22 @@ abstract class StreamingInvoker[A, E <: WithExtractor] {
     val sql = streamingSql.underlying
     val executor = streamingSession.toStatementExecutor(sql.statement, sql.rawParameters)
     val proxy = new DBConnectionAttributesWiredResultSet(executor.executeQuery(), streamingSession.connectionAttributes)
-    new ExtractedResultIterator[A](proxy, true)(sql.extractor) {
-      private[this] var closed = false
+    new StreamingInvoker.ExtractedResultIteratorImpl[A](executor, proxy, true)(sql.extractor)
+  }
+}
 
-      override def close(): Unit = if (!closed) {
-        executor.close()
-        closed = true
-      }
+object StreamingInvoker {
+
+  private class ExtractedResultIteratorImpl[+A](
+      executor: StatementExecutor,
+      rs: ResultSet,
+      autoClose: Boolean
+  )(extract: WrappedResultSet => A) extends ExtractedResultIterator[A](rs, autoClose)(extract) {
+    private[this] var closed = false
+
+    override def close(): Unit = if (!closed) {
+      executor.close()
+      closed = true
     }
   }
 }

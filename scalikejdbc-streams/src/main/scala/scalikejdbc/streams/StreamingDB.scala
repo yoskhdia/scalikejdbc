@@ -10,73 +10,71 @@ import scala.util.control.NonFatal
 import scala.util.{ Failure, Success }
 
 class StreamingDB(
-    executor: StreamingDB.Executor,
-    name: Any,
-    connectionPoolContext: DB.CPContext,
-    settings: SettingsProvider,
-    bufferNext: Boolean = true
-) extends LogSupport { self =>
-  type StreamingActionContext = StreamingContext
+    protected[StreamingDB] val executor: StreamingDB.Executor,
+    protected[StreamingDB] val name: Any,
+    protected[StreamingDB] val connectionPoolContext: DB.CPContext,
+    protected[StreamingDB] val settings: SettingsProvider,
+    protected[StreamingDB] val bufferNext: Boolean = true
+) {
+  self =>
+
+  import StreamingDB.StreamingActionImpl
+  import StreamingDB.DatabasePublisherImpl
 
   def stream[A, E <: WithExtractor](sql: StreamingSQL[A, E]): DatabasePublisher[A] = {
     val action = createAction(sql)
     createPublisher(action)
   }
 
-  protected[this] def createAction[A, E <: WithExtractor](sql: StreamingSQL[A, E]): StreamingAction[A, E] = {
-    new StreamingAction[A, E] {
-      override def createInvoker(): StreamingInvoker[A, E] = {
-        new StreamingInvoker[A, E] {
-          override protected[this] def streamingSql: StreamingSQL[A, E] = sql
-        }
-      }
+  protected[this] def createAction[A, E <: WithExtractor](sql: StreamingSQL[A, E]): StreamingAction[A, E] = new StreamingActionImpl(sql)
+
+  protected[this] def createPublisher[A, E <: WithExtractor](action: StreamingAction[A, E]): DatabasePublisher[A] = new DatabasePublisherImpl(action, self)
+
+}
+
+object StreamingDB extends LogSupport {
+  type Executor = AsyncExecutor
+
+  def apply(dbName: Any, executor: Executor)(implicit
+    context: DB.CPContext = DB.NoCPContext,
+    settingsProvider: SettingsProvider = SettingsProvider.default): StreamingDB = {
+    new StreamingDB(executor, dbName, context, settingsProvider)
+  }
+
+  // same as https://github.com/scalikejdbc/scalikejdbc/blob/2.5.0/scalikejdbc-core/src/main/scala/scalikejdbc/DB.scala#L151-L157
+  private[this] def connectionPool(dbName: Any, context: DB.CPContext): ConnectionPool = Option(context match {
+    case DB.NoCPContext => ConnectionPool(dbName)
+    case _: MultipleConnectionPoolContext => context.get(dbName)
+    case _ => throw new IllegalStateException(ErrorMessage.UNKNOWN_CONNECTION_POOL_CONTEXT)
+  }) getOrElse {
+    throw new IllegalStateException(ErrorMessage.CONNECTION_POOL_IS_NOT_YET_INITIALIZED)
+  }
+
+  private[this] def connect(dbName: Any, connectionPoolContext: DB.CPContext, settings: SettingsProvider): DBConnection = {
+    val pool = connectionPool(dbName, connectionPoolContext)
+    DB(pool.borrow(), pool.connectionAttributes, settings).autoClose(false)
+  }
+
+  private[this] def acquireSession(context: StreamingActionContext, database: StreamingDB): Unit = {
+    context.currentSession = connect(database.name, database.connectionPoolContext, database.settings).readOnlySession()
+  }
+
+  private[this] def releaseSession(context: StreamingActionContext, discardErrors: Boolean): Unit = {
+    try context.currentSession.close() catch {
+      case NonFatal(_) if discardErrors =>
     }
-  }
-
-  protected[this] def createPublisher[A, E <: WithExtractor](action: StreamingAction[A, E]): DatabasePublisher[A] = {
-    new DatabasePublisher[A] {
-      override def subscribe(s: Subscriber[_ >: A]): Unit = {
-        if (s eq null) {
-          throw new NullPointerException("given a null Subscriber in subscribe. (see Reactive Streams spec, 1.9)")
-        }
-        val context = new StreamingContext(s, self, bufferNext)
-        val subscribed = try { s.onSubscribe(context); true } catch {
-          case NonFatal(ex) =>
-            log.warn("Subscriber.onSubscribe failed unexpectedly", ex)
-            false
-        }
-        if (subscribed) {
-          try {
-            context.streamingAction = action
-            scheduleSynchronousStreaming(context.streamingAction, context)(null)
-            context.streamingResultPromise.future.onComplete {
-              case Success(_) => context.tryOnComplete()
-              case Failure(t) => context.tryOnError(t)
-            }(executor.executionContext)
-          } catch { case NonFatal(ex) => context.tryOnError(ex) }
-        }
-      }
-    }
-  }
-
-  protected[this] def acquireSession(context: StreamingContext): Unit = {
-    context.currentSession = StreamingDB.connect(name, connectionPoolContext, settings).readOnlySession()
-  }
-
-  protected[this] def releaseSession(context: StreamingContext, discardErrors: Boolean): Unit = {
-    try context.currentSession.close() catch { case NonFatal(_) if discardErrors => }
     context.currentSession = null
   }
 
-  protected[StreamingDB] def scheduleSynchronousStreaming(a: StreamingAction[_, _ <: WithExtractor], ctx: StreamingActionContext)(initialState: a.State): Unit = try {
-    executor.execute(new Runnable {
+  private[this] def scheduleSynchronousStreaming(database: StreamingDB, a: StreamingAction[_, _ <: WithExtractor], ctx: StreamingActionContext)(initialState: a.State): Unit = try {
+    database.executor.execute(new Runnable {
       private[this] def str(l: Long) = if (l != Long.MaxValue) l else "Inf"
 
       def run(): Unit = try {
         val debug = log.isDebugEnabled
         var state = initialState
         val _ = ctx.sync
-        if (state eq null) acquireSession(ctx)
+        if (state eq null) acquireSession(ctx, database)
         var demand = ctx.demandBatch
         var realDemand = if (demand < 0) demand - Long.MinValue else demand
         do {
@@ -85,7 +83,8 @@ class StreamingDB(
               log.debug((if (state eq null) "Starting initial" else "Restarting") + " streaming action, realDemand = " + str(realDemand))
             if (ctx.cancelled) {
               if (ctx.deferredError ne null) throw ctx.deferredError
-              if (state ne null) { // streaming cancelled before finishing
+              if (state ne null) {
+                // streaming cancelled before finishing
                 val oldState = state
                 state = null
                 a.cancelStream(ctx, oldState)
@@ -95,13 +94,16 @@ class StreamingDB(
               state = null
               state = a.emitStream(ctx, realDemand, oldState)
             }
-            if (state eq null) { // streaming finished and cleaned up
+            if (state eq null) {
+              // streaming finished and cleaned up
               releaseSession(ctx, true)
               ctx.streamingResultPromise.trySuccess(null)
             }
           } catch {
             case NonFatal(ex) =>
-              if (state ne null) try a.cancelStream(ctx, state) catch { case NonFatal(_) => () }
+              if (state ne null) try a.cancelStream(ctx, state) catch {
+                case NonFatal(_) => ()
+              }
               releaseSession(ctx, true)
               throw ex
           } finally {
@@ -119,7 +121,9 @@ class StreamingDB(
           if (state ne null) log.debug("Suspending streaming action with continuation (more data available)")
           else log.debug("Finished streaming action")
         }
-      } catch { case NonFatal(ex) => ctx.streamingResultPromise.tryFailure(ex) }
+      } catch {
+        case NonFatal(ex) => ctx.streamingResultPromise.tryFailure(ex)
+      }
     })
   } catch {
     case NonFatal(ex) =>
@@ -127,7 +131,47 @@ class StreamingDB(
       throw ex
   }
 
-  class StreamingContext(subscriber: Subscriber[_], database: StreamingDB, val bufferNext: Boolean) extends Subscription with LogSupport {
+  private class StreamingActionImpl[A, E <: WithExtractor](sql: StreamingSQL[A, E]) extends StreamingAction[A, E] {
+    override def createInvoker(): StreamingInvoker[A, E] = {
+      new StreamingInvokerImpl[A, E](sql)
+    }
+  }
+
+  private class StreamingInvokerImpl[A, E <: WithExtractor](sql: StreamingSQL[A, E]) extends StreamingInvoker[A, E] {
+    override protected[this] def streamingSql: StreamingSQL[A, E] = sql
+  }
+
+  private class DatabasePublisherImpl[A, E <: WithExtractor](action: StreamingAction[A, E], database: StreamingDB) extends DatabasePublisher[A] with LogSupport {
+    override def subscribe(s: Subscriber[_ >: A]): Unit = {
+      if (s eq null) {
+        throw new NullPointerException("given a null Subscriber in subscribe. (see Reactive Streams spec, 1.9)")
+      }
+      val context = new StreamingActionContext(s, database, database.bufferNext)
+      val subscribed = try {
+        s.onSubscribe(context); true
+      } catch {
+        case NonFatal(ex) =>
+          log.warn("Subscriber.onSubscribe failed unexpectedly", ex)
+          false
+      }
+      if (subscribed) {
+        try {
+          context.streamingAction = action
+          scheduleSynchronousStreaming(database, context.streamingAction, context)(null)
+          context.streamingResultPromise.future.onComplete {
+            case Success(_) => context.tryOnComplete()
+            case Failure(t) => context.tryOnError(t)
+          }(database.executor.executionContext)
+        } catch {
+          case NonFatal(ex) => context.tryOnError(ex)
+        }
+      }
+    }
+  }
+
+  // Context keeps all the state necessary for streaming.
+  // Context has the longest lifetime (except reusable objects such as AsyncExecutor).
+  class StreamingActionContext(subscriber: Subscriber[_], database: StreamingDB, val bufferNext: Boolean) extends Subscription with LogSupport {
     /**
      * A volatile variable to enforce the happens-before relationship (see
      * [[https://docs.oracle.com/javase/specs/jls/se7/html/jls-17.html]] and
@@ -227,7 +271,7 @@ class StreamingDB(
         streamState = null
         if (log.isDebugEnabled) log.debug("Scheduling stream continuation after transition from demand = 0")
         val a = streamingAction
-        database.scheduleSynchronousStreaming(a, this.asInstanceOf[database.StreamingActionContext])(s.asInstanceOf[a.State])
+        scheduleSynchronousStreaming(database, a, this)(s.asInstanceOf[a.State])
       } else {
         if (log.isDebugEnabled) log.debug("Saw transition from demand = 0, but no stream continuation available")
       }
@@ -259,30 +303,6 @@ class StreamingDB(
       // allow the rest of the scheduled Action to run.
       if (remaining.getAndSet(Long.MaxValue) == 0L) restartStreaming()
     }
-  }
-}
-
-object StreamingDB {
-  type Executor = AsyncExecutor
-
-  // same as https://github.com/scalikejdbc/scalikejdbc/blob/2.5.0/scalikejdbc-core/src/main/scala/scalikejdbc/DB.scala#L151-L157
-  private[this] def connectionPool(dbName: Any, context: DB.CPContext): ConnectionPool = Option(context match {
-    case DB.NoCPContext => ConnectionPool(dbName)
-    case _: MultipleConnectionPoolContext => context.get(dbName)
-    case _ => throw new IllegalStateException(ErrorMessage.UNKNOWN_CONNECTION_POOL_CONTEXT)
-  }) getOrElse {
-    throw new IllegalStateException(ErrorMessage.CONNECTION_POOL_IS_NOT_YET_INITIALIZED)
-  }
-
-  protected def connect(dbName: Any, connectionPoolContext: DB.CPContext, settings: SettingsProvider): DBConnection = {
-    val pool = connectionPool(dbName, connectionPoolContext)
-    DB(pool.borrow(), pool.connectionAttributes, settings).autoClose(false)
-  }
-
-  def apply(dbName: Any, executor: Executor)(implicit
-    context: DB.CPContext = DB.NoCPContext,
-    settingsProvider: SettingsProvider = SettingsProvider.default): StreamingDB = {
-    new StreamingDB(executor, dbName, context, settingsProvider)
   }
 }
 
