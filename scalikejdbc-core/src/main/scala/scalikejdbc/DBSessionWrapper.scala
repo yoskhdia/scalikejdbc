@@ -2,7 +2,7 @@ package scalikejdbc
 
 import java.sql.PreparedStatement
 
-import scala.collection.generic.CanBuildFrom
+import scala.collection.compat._
 import scala.language.higherKinds
 
 /**
@@ -23,7 +23,7 @@ private[scalikejdbc] final class DBSessionWrapper(
   override def fetchSize: Option[Int] = session.fetchSize
 
   override def tags(tags: String*): this.type = unexpectedInvocation
-  override def tags: Seq[String] = session.tags
+  override def tags: scala.collection.Seq[String] = session.tags
 
   override def queryTimeout(seconds: Int): this.type = unexpectedInvocation
   override def queryTimeout(seconds: Option[Int]): this.type = unexpectedInvocation
@@ -35,7 +35,7 @@ private[scalikejdbc] final class DBSessionWrapper(
     }
   }
 
-  override def toStatementExecutor(template: String, params: Seq[Any], returnGeneratedKeys: Boolean): StatementExecutor = {
+  override def toStatementExecutor(template: String, params: scala.collection.Seq[Any], returnGeneratedKeys: Boolean): StatementExecutor = {
     withAttributesSwitchedDBSession(_.toStatementExecutor(template, params, returnGeneratedKeys))
   }
   override def toBatchStatementExecutor(template: String): StatementExecutor = {
@@ -51,7 +51,7 @@ private[scalikejdbc] final class DBSessionWrapper(
   override def list[A](template: String, params: Any*)(extract: (WrappedResultSet) => A): List[A] = {
     withAttributesSwitchedDBSession(_.list(template, params: _*)(extract))
   }
-  override def collection[A, C[_]](template: String, params: Any*)(extract: (WrappedResultSet) => A)(implicit cbf: CanBuildFrom[Nothing, A, C[A]]): C[A] = {
+  override def collection[A, C[_]](template: String, params: Any*)(extract: (WrappedResultSet) => A)(implicit f: Factory[A, C[A]]): C[A] = {
     withAttributesSwitchedDBSession(_.collection(template, params: _*)(extract))
   }
   override def foreach(template: String, params: Any*)(f: (WrappedResultSet) => Unit): Unit = {
@@ -60,8 +60,8 @@ private[scalikejdbc] final class DBSessionWrapper(
   override def foldLeft[A](template: String, params: Any*)(z: A)(op: (A, WrappedResultSet) => A): A = {
     withAttributesSwitchedDBSession(_.foldLeft(template, params: _*)(z)(op))
   }
-  override def traversable[A](template: String, params: Any*)(extract: (WrappedResultSet) => A): Traversable[A] = {
-    withAttributesSwitchedDBSession(_.traversable(template, params: _*)(extract))
+  override def iterable[A](template: String, params: Any*)(extract: (WrappedResultSet) => A): Iterable[A] = {
+    withAttributesSwitchedDBSession(_.iterable(template, params: _*)(extract))
   }
 
   override def execute(template: String, params: Any*): Boolean = {
@@ -91,13 +91,13 @@ private[scalikejdbc] final class DBSessionWrapper(
   override def updateAndReturnSpecifiedGeneratedKey(template: String, params: Any*)(key: Any): Long = {
     withAttributesSwitchedDBSession(_.updateAndReturnSpecifiedGeneratedKey(template, params: _*)(key))
   }
-  override def batch[C[_]](template: String, paramsList: Seq[Any]*)(implicit cbf: CanBuildFrom[Nothing, Int, C[Int]]): C[Int] = {
+  override def batch[C[_]](template: String, paramsList: scala.collection.Seq[Any]*)(implicit f: Factory[Int, C[Int]]): C[Int] = {
     withAttributesSwitchedDBSession(_.batch(template, paramsList: _*))
   }
-  override def batchAndReturnGeneratedKey[C[_]](template: String, paramsList: Seq[Any]*)(implicit cbf: CanBuildFrom[Nothing, Long, C[Long]]): C[Long] = {
+  override def batchAndReturnGeneratedKey[C[_]](template: String, paramsList: scala.collection.Seq[Any]*)(implicit f: Factory[Long, C[Long]]): C[Long] = {
     withAttributesSwitchedDBSession(_.batchAndReturnGeneratedKey(template, paramsList: _*))
   }
-  override def batchAndReturnSpecifiedGeneratedKey[C[_]](template: String, key: String, paramsList: Seq[Any]*)(implicit cbf: CanBuildFrom[Nothing, Long, C[Long]]): C[Long] = {
+  override def batchAndReturnSpecifiedGeneratedKey[C[_]](template: String, key: String, paramsList: scala.collection.Seq[Any]*)(implicit f: Factory[Long, C[Long]]): C[Long] = {
     withAttributesSwitchedDBSession(_.batchAndReturnSpecifiedGeneratedKey(template, key, paramsList: _*))
   }
 

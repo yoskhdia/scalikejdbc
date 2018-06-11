@@ -228,37 +228,37 @@ trait QueryDSLFeature { self: SQLInterpolationFeature with SQLSyntaxSupportFeatu
     def between[B: ParameterBinderFactory, C: ParameterBinderFactory](column: SQLSyntax, a: B, b: C): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${sqls.between(column, a, b)}")
     def notBetween[B: ParameterBinderFactory, C: ParameterBinderFactory](column: SQLSyntax, a: B, b: C): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${sqls.notBetween(column, a, b)}")
 
-    def in[B: ParameterBinderFactory](column: SQLSyntax, values: Seq[B]): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${sqls.in(column, values)}")
+    def in[B: ParameterBinderFactory](column: SQLSyntax, values: collection.Seq[B]): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${sqls.in(column, values)}")
 
     def in(column: SQLSyntax, subQuery: SQLBuilder[_]): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${column} in (${subQuery.toSQLSyntax})")
 
-    def in[B: ParameterBinderFactory, C: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C)]): ConditionSQLBuilder[A] = {
+    def in[B: ParameterBinderFactory, C: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.in(columns, valueSeqs)}")
     }
-    def in[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C, D)]): ConditionSQLBuilder[A] = {
+    def in[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C, D)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.in(columns, valueSeqs)}")
     }
-    def in[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C, D, E)]): ConditionSQLBuilder[A] = {
+    def in[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C, D, E)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.in(columns, valueSeqs)}")
     }
-    def in[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory, G: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C, D, E, G)]): ConditionSQLBuilder[A] = {
+    def in[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory, G: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C, D, E, G)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.in(columns, valueSeqs)}")
     }
 
-    def notIn[B: ParameterBinderFactory](column: SQLSyntax, values: Seq[B]): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${sqls.notIn(column, values)}")
+    def notIn[B: ParameterBinderFactory](column: SQLSyntax, values: collection.Seq[B]): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${sqls.notIn(column, values)}")
 
     def notIn(column: SQLSyntax, subQuery: SQLBuilder[_]): ConditionSQLBuilder[A] = ConditionSQLBuilder[A](sqls"${sql} ${column} not in (${subQuery.toSQLSyntax})")
 
-    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C)]): ConditionSQLBuilder[A] = {
+    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.notIn(columns, valueSeqs)}")
     }
-    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C, D)]): ConditionSQLBuilder[A] = {
+    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C, D)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.notIn(columns, valueSeqs)}")
     }
-    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C, D, E)]): ConditionSQLBuilder[A] = {
+    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C, D, E)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.notIn(columns, valueSeqs)}")
     }
-    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory, G: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: Seq[(B, C, D, E, G)]): ConditionSQLBuilder[A] = {
+    def notIn[B: ParameterBinderFactory, C: ParameterBinderFactory, D: ParameterBinderFactory, E: ParameterBinderFactory, G: ParameterBinderFactory](columns: (SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax, SQLSyntax), valueSeqs: collection.Seq[(B, C, D, E, G)]): ConditionSQLBuilder[A] = {
       ConditionSQLBuilder[A](sqls"${sql} ${sqls.notIn(columns, valueSeqs)}")
     }
 
@@ -467,7 +467,7 @@ trait QueryDSLFeature { self: SQLInterpolationFeature with SQLSyntaxSupportFeatu
 
     def map(mapper: SelectSQLBuilder[A] => SelectSQLBuilder[A]): SelectSQLBuilder[A] = mapper.apply(this)
 
-    private def lazyLoadedPart: SQLSyntax = sqls"select ${sqls.join(resultAllProviders.reverseMap(_.resultAll), sqls",")}"
+    private def lazyLoadedPart: SQLSyntax = sqls"select ${sqls.join(resultAllProviders.reverseIterator.map(_.resultAll).toSeq, sqls",")}"
 
     override def toSQLSyntax: SQLSyntax = if (lazyColumns) sqls"${lazyLoadedPart} ${sql}" else sqls"${sql}"
     override def toSQL: SQL[A, NoExtractor] = if (lazyColumns) sql"${lazyLoadedPart} ${sql}" else sql"${sql}"
@@ -482,6 +482,13 @@ trait QueryDSLFeature { self: SQLInterpolationFeature with SQLSyntaxSupportFeatu
     def values(values: Any*): InsertSQLBuilder = {
       val vs = sqls.csv(values.map(v => sqls"${v}"): _*)
       this.copy(sql = sqls"${sql} values (${vs})")
+    }
+    def multipleValues(multipleValues: collection.Seq[Any]*): InsertSQLBuilder = {
+      val vs = multipleValues match {
+        case Nil => Seq(sqls"()")
+        case ss => ss.map(s => sqls"(${sqls.toCSV(s.map(v => sqls"${v}"))})")
+      }
+      this.copy(sql = sqls"${sql} values ${sqls.join(vs, sqls",", false)}")
     }
 
     def namedValues(columnsAndValues: (SQLSyntax, ParameterBinder)*): InsertSQLBuilder = {
@@ -540,7 +547,7 @@ trait QueryDSLFeature { self: SQLInterpolationFeature with SQLSyntaxSupportFeatu
      *
      * @see [[https://github.com/scalikejdbc/scalikejdbc/pull/507]]
      */
-    def set(tuples: Map[SQLSyntax, ParameterBinder]): UpdateSQLBuilder = set(sqls.csv(tuples.map(each => sqls"${each._1} = ${each._2}")(collection.breakOut): _*))
+    def set(tuples: Map[SQLSyntax, ParameterBinder]): UpdateSQLBuilder = set(sqls.csv(tuples.map(each => sqls"${each._1} = ${each._2}").toSeq: _*))
 
     /**
      *  `returning` for PostgreSQL

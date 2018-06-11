@@ -22,7 +22,7 @@ object SbtPlugin {
   type GeneratorSettings = ScalikejdbcPlugin.autoImport.GeneratorSettings
 
   @deprecated("will be removed. add `enablePlugins(ScalikejdbcPlugin)` in your build.sbt", "")
-  val scalikejdbcSettings: Seq[Def.Setting[_]] = ScalikejdbcPlugin.projectSettings
+  val scalikejdbcSettings: collection.Seq[Def.Setting[_]] = ScalikejdbcPlugin.projectSettings
 }
 
 object ScalikejdbcPlugin extends AutoPlugin {
@@ -56,13 +56,14 @@ object ScalikejdbcPlugin extends AutoPlugin {
       columnNameToFieldName: String => String,
       returnCollectionType: ReturnCollectionType,
       view: Boolean,
-      tableNamesToSkip: Seq[String],
-      baseTypes: Seq[String],
-      companionBaseTypes: Seq[String],
-      tableNameToSyntaxName: String => String)
+      tableNamesToSkip: collection.Seq[String],
+      baseTypes: collection.Seq[String],
+      companionBaseTypes: collection.Seq[String],
+      tableNameToSyntaxName: String => String,
+      tableNameToSyntaxVariableName: String => String)
 
     @deprecated("will be removed. add `enablePlugins(ScalikejdbcPlugin)` in your build.sbt", "")
-    lazy val scalikejdbcSettings: Seq[Def.Setting[_]] = projectSettings
+    lazy val scalikejdbcSettings: collection.Seq[Def.Setting[_]] = projectSettings
   }
 
   import autoImport._
@@ -75,7 +76,7 @@ object ScalikejdbcPlugin extends AutoPlugin {
       } else str
     }
 
-  private[this] def commaSeparated(props: Properties, key: String): Seq[String] =
+  private[this] def commaSeparated(props: Properties, key: String): collection.Seq[String] =
     getString(props, key).map(_.split(',').map(_.trim).filter(_.nonEmpty).toList).getOrElse(Nil)
 
   private[this] final val JDBC = "jdbc."
@@ -126,7 +127,7 @@ object ScalikejdbcPlugin extends AutoPlugin {
       schema = getString(props, JDBC_SCHEMA).orNull[String])
   }
 
-  private[this] def loadGeneratorSettings(props: Properties): GeneratorSettings = {
+  private[this] val loadGeneratorSettings: Def.Initialize[Task[Properties => GeneratorSettings]] = Def.task { props =>
     val defaultConfig = GeneratorConfig()
     GeneratorSettings(
       packageName = getString(props, PACKAGE_NAME).getOrElse(defaultConfig.packageName),
@@ -143,13 +144,23 @@ object ScalikejdbcPlugin extends AutoPlugin {
       defaultConfig.tableNameToClassName,
       defaultConfig.columnNameToFieldName,
       returnCollectionType = getString(props, RETURN_COLLECTION_TYPE).map { name =>
-        ReturnCollectionType.map.getOrElse(name.toLowerCase(en), sys.error(s"does not support $name. support types are ${ReturnCollectionType.map.keys.mkString(", ")}"))
+        val CBF = "canbuildfrom"
+        name.toLowerCase(en) match {
+          case CBF =>
+            streams.value.log.warn(s"""$CBF deprecated. use "$RETURN_COLLECTION_TYPE = factory" instead""")
+            ReturnCollectionType.Factory
+          case n =>
+            ReturnCollectionType.map.getOrElse(
+              n,
+              sys.error(s"does not support $name. support types are ${ReturnCollectionType.map.keys.mkString(", ")}"))
+        }
       }.getOrElse(defaultConfig.returnCollectionType),
       view = getString(props, VIEW).map(_.toBoolean).getOrElse(defaultConfig.view),
       tableNamesToSkip = getString(props, TABLE_NAMES_TO_SKIP).map(_.split(",").toList).getOrElse(defaultConfig.tableNamesToSkip),
       baseTypes = commaSeparated(props, BASE_TYPES),
       companionBaseTypes = commaSeparated(props, COMPANION_BASE_TYPES),
-      tableNameToSyntaxName = defaultConfig.tableNameToSyntaxName)
+      tableNameToSyntaxName = defaultConfig.tableNameToSyntaxName,
+      tableNameToSyntaxVariableName = defaultConfig.tableNameToSyntaxVariableName)
   }
 
   private[this] def loadPropertiesFromFile(): Either[FileNotFoundException, Properties] = {
@@ -196,7 +207,8 @@ object ScalikejdbcPlugin extends AutoPlugin {
       tableNamesToSkip = generatorSettings.tableNamesToSkip,
       tableNameToBaseTypes = _ => generatorSettings.baseTypes,
       tableNameToCompanionBaseTypes = _ => generatorSettings.companionBaseTypes,
-      tableNameToSyntaxName = generatorSettings.tableNameToSyntaxName)
+      tableNameToSyntaxName = generatorSettings.tableNameToSyntaxName,
+      tableNameToSyntaxVariableName = generatorSettings.tableNameToSyntaxVariableName)
 
   private def generator(tableName: String, className: Option[String], srcDir: File, testDir: File, jdbc: JDBCSettings, generatorSettings: GeneratorSettings): Option[CodeGenerator] = {
     val config = generatorConfig(srcDir, testDir, generatorSettings)
@@ -213,7 +225,7 @@ object ScalikejdbcPlugin extends AutoPlugin {
       }
   }
 
-  def allGenerators(srcDir: File, testDir: File, jdbc: JDBCSettings, generatorSettings: GeneratorSettings): Seq[CodeGenerator] = {
+  def allGenerators(srcDir: File, testDir: File, jdbc: JDBCSettings, generatorSettings: GeneratorSettings): collection.Seq[CodeGenerator] = {
     val config = generatorConfig(srcDir, testDir, generatorSettings)
     val className = None
     Class.forName(jdbc.driver) // load specified jdbc driver
@@ -236,7 +248,7 @@ object ScalikejdbcPlugin extends AutoPlugin {
   private def genTaskParser(keyName: String): complete.Parser[GenTaskParameter] = (
     Space ~> token(StringBasic, "tableName") ~ (Space ~> token(StringBasic, "(class-name)")).?).map(GenTaskParameter.tupled).!!!("Usage: " + keyName + " [table-name (class-name)]")
 
-  override val projectSettings: Seq[Def.Setting[_]] = inConfig(Compile)(Seq(
+  override val projectSettings: collection.Seq[Def.Setting[_]] = inConfig(Compile)(Seq(
     scalikejdbcCodeGeneratorSingle := {
       val srcDir = (scalaSource in Compile).value
       val testDir = (scalaSource in Test).value
@@ -286,10 +298,17 @@ object ScalikejdbcPlugin extends AutoPlugin {
       gen.foreach(g => g.specAll().foreach(spec => println(spec)))
     },
     scalikejdbcJDBCSettings := loadPropertiesFromFile().fold(throw _, loadJDBCSettings),
-    scalikejdbcGeneratorSettings := loadPropertiesFromFile().fold(throw _, loadGeneratorSettings)))
+    scalikejdbcGeneratorSettings := {
+      loadPropertiesFromFile() match {
+        case Left(e) =>
+          throw e
+        case Right(p) =>
+          loadGeneratorSettings.value.apply(p)
+      }
+    }))
 
   @deprecated("will be removed. add `enablePlugins(ScalikejdbcPlugin)` in your build.sbt", "")
-  val scalikejdbcSettings: Seq[Def.Setting[_]] = projectSettings
+  val scalikejdbcSettings: collection.Seq[Def.Setting[_]] = projectSettings
 
   def using[R <: { def close(): Unit }, A](resource: R)(f: R => A): A = ultimately {
     ignoring(classOf[Throwable]) apply resource.close()

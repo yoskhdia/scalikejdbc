@@ -41,7 +41,7 @@ TaskKey[Unit]("createTestDatabase") := {
 testOptions in Test += {
   val setting = (scalikejdbcJDBCSettings in Compile).value
   Tests.Setup{ loader =>
-    type Initializer = {def run(url: String, username: String, password: String)}
+    type Initializer = {def run(url: String, username: String, password: String): Unit}
     val initializer = loader.loadClass("app.Initializer").getDeclaredConstructor().newInstance().asInstanceOf[Initializer]
     initializer.run(setting.url, setting.username, setting.password)
   }
@@ -49,7 +49,7 @@ testOptions in Test += {
 
 val scalikejdbcVersion = System.getProperty("plugin.version")
 
-crossScalaVersions := List("2.12.4", "2.11.12")
+crossScalaVersions := List("2.12.6", "2.11.12")
 
 scalacOptions ++= Seq("-Xlint", "-language:_", "-deprecation", "-unchecked")
 
@@ -67,12 +67,12 @@ libraryDependencies ++= Seq(
 )
 
 TaskKey[Unit]("generateCodeForIssue339") := {
-  import java.sql.Types
+  import java.sql.JDBCType
   import scalikejdbc.mapper._
-  val key = Column("key", Types.INTEGER, true, true)
+  val key = Column("key", JDBCType.INTEGER, true, true)
   val other = List(
-    Column("column1", Types.OTHER, true, false),
-    Column("column2", Types.OTHER, false, false)
+    Column("column1", JDBCType.OTHER, true, false),
+    Column("column2", JDBCType.OTHER, false, false)
   )
   val all = key :: other
   val table = Table("Issue339table", all, all.filter(_.isAutoIncrement), key :: Nil)

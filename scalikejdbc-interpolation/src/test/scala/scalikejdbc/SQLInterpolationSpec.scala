@@ -55,7 +55,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
     override val columns = Seq("id", "website_url")
     def apply(rs: WrappedResultSet, g: ResultName[Group]): Group = Group(id = rs.int(g.id), websiteUrl = rs.stringOpt(g.field("websiteUrl")))
   }
-  case class Group(id: Int, websiteUrl: Option[String], members: Seq[User] = Nil)
+  case class Group(id: Int, websiteUrl: Option[String], members: collection.Seq[User] = Nil)
 
   object GroupMember extends SQLSyntaxSupport[GroupMember] {
     override val tableName = "group_members"
@@ -274,7 +274,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
 
           {
             val gm = GroupMember.syntax
-            val groupsWithMembers: Traversable[Group] = sql"""
+            val groupsWithMembers: Iterable[Group] = sql"""
             select
               ${u.result.*}, ${g.result.*}
             from
@@ -286,7 +286,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
               .one(rs => Group(rs, g.resultName))
               .toMany(rs => Some(User(rs, u.resultName)))
               .map { (g, us) => g.copy(members = us) }
-              .traversable.apply()
+              .iterable.apply()
 
             groupsWithMembers.size should equal(2)
             groupsWithMembers.head.members.size should equal(2)
@@ -380,7 +380,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
     }
   }
 
-  case class Issue(id: Int, body: String, tags: Seq[Tag] = Vector())
+  case class Issue(id: Int, body: String, tags: collection.Seq[Tag] = Vector())
   object Issue extends SQLSyntaxSupport[Issue] {
     def apply(rs: WrappedResultSet, i: ResultName[Issue]): Issue = Issue(
       id = rs.int(i.id),
@@ -525,7 +525,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
       Customer(rs.int(c.id), rs.string(c.name))
     }
   }
-  case class Customer(id: Int, name: String, groupId: Option[Int] = None, group: Option[CustomerGroup] = None, orders: Seq[Order] = Nil)
+  case class Customer(id: Int, name: String, groupId: Option[Int] = None, group: Option[CustomerGroup] = None, orders: collection.Seq[Order] = Nil)
 
   object CustomerGroup extends SQLSyntaxSupport[CustomerGroup] {
     override val tableName = "customer_group"
@@ -622,7 +622,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
             val (c, cg) = (Customer.syntax("c"), CustomerGroup.syntax("cg"))
             val sq = SubQuery.syntax("sq", c.resultName)
 
-            val customers: Traversable[Customer] = sql"""
+            val customers: Iterable[Customer] = sql"""
             select
               ${sq.result.*}, ${cg.result.*}
             from
@@ -635,7 +635,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
               .one(rs => Customer(rs.int(sq(c).resultName.id), rs.string(sq(c).resultName.name)))
               .toOptionalOne(rs => rs.intOpt(cg.resultName.id).map(id => CustomerGroup(id, rs.string(cg.resultName.name))))
               .map { (c, cg) => c.copy(group = cg) }
-              .traversable
+              .iterable
               .apply()
 
             customers.map(u => u.id) should equal(Seq(4, 5))
@@ -851,10 +851,55 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
   }
 
   it should "return statement and parameters" in {
-    val (id, name) = (123, "Alice")
-    val sql = sql"insert into company values (${id}, ${name})"
-    sql.statement should equal("insert into company values (?, ?)")
-    sql.parameters should equal(Seq(123, "Alice"))
+    {
+      val (id, name) = (123, "Alice")
+      val sql = sql"insert into company values (${id}, ${name})"
+      sql.statement should equal("insert into company values (?, ?)")
+      sql.parameters should equal(Seq(123, "Alice"))
+    }
+
+    {
+      val sql = insert.into(Order).values().toSQL
+      sql.statement should equal("insert into orders values ()")
+    }
+
+    {
+      val sql = insert.into(Order).values(Nil).toSQL
+      sql.statement should equal("insert into orders values ()")
+    }
+
+    {
+      val (id, customer_id, product_id, ordered_at) = (11, 1, Some(1), LocalDateTime.of(2018, 4, 20, 0, 0))
+      val sql = insert.into(Order).values(id, customer_id, product_id, ordered_at).toSQL
+      sql.statement should equal("insert into orders values (?, ?, ?, ?)")
+      sql.parameters should equal(Seq(11, 1, Some(1), LocalDateTime.of(2018, 4, 20, 0, 0)))
+    }
+
+    {
+      val sql = insert.into(Order).multipleValues().toSQL
+      sql.statement should equal("insert into orders values ()")
+    }
+
+    {
+      val sql = insert.into(Order).multipleValues(Nil).toSQL
+      sql.statement should equal("insert into orders values ()")
+    }
+
+    {
+      val vs = Seq(11, 1, Some(1), LocalDateTime.of(2018, 4, 20, 0, 0))
+      val sql = insert.into(Order).multipleValues(vs).toSQL
+      sql.statement should equal("insert into orders values (?, ?, ?, ?)")
+      sql.parameters should equal(Seq(11, 1, Some(1), LocalDateTime.of(2018, 4, 20, 0, 0)))
+    }
+
+    {
+      val Seq(vs1, vs2) = Seq(
+        Seq(11, 1, Some(1), LocalDateTime.of(2018, 4, 20, 0, 0)),
+        Seq(12, 2, Some(2), LocalDateTime.of(2018, 1, 2, 3, 4)))
+      val sql = insert.into(Order).multipleValues(vs1, vs2).toSQL
+      sql.statement should equal("insert into orders values (?, ?, ?, ?), (?, ?, ?, ?)")
+      sql.parameters should equal(Seq(11, 1, Some(1), LocalDateTime.of(2018, 4, 20, 0, 0), 12, 2, Some(2), LocalDateTime.of(2018, 1, 2, 3, 4)))
+    }
   }
 
   it should "cache columns" in {
@@ -958,7 +1003,7 @@ class SQLInterpolationSpec extends FlatSpec with Matchers with DBSettings with S
 
   val tableAliasName = "table"
   val delimiterForResultName = "_on_"
-  val columns: Seq[SQLSyntax] = Seq(sqls"first_name", sqls"last_name", sqls"birth_date", sqls"company_id", sqls"id", sqls"created_at")
+  val columns: collection.Seq[SQLSyntax] = Seq(sqls"first_name", sqls"last_name", sqls"birth_date", sqls"company_id", sqls"id", sqls"created_at")
   val cachedColumns = new TrieMap[String, SQLSyntax]()
 
   def columnNoCache(name: String): SQLSyntax = {

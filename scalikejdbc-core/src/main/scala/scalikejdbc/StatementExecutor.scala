@@ -1,14 +1,16 @@
 package scalikejdbc
 
 import java.sql.PreparedStatement
+
+import org.slf4j.LoggerFactory
+
 import scala.language.reflectiveCalls
+import scala.util.control.NonFatal
 
 /**
  * Companion object.
  */
 object StatementExecutor {
-
-  type MutableList[A] = collection.mutable.MutableList[A]
 
   val eol: String = System.getProperty("line.separator")
 
@@ -20,6 +22,102 @@ object StatementExecutor {
   }
 
   private val LocalDateEpoch = java.time.LocalDate.ofEpochDay(0)
+
+  object PrintableQueryBuilder extends PrintableQueryBuilder {
+    // Find ? placeholders, but ignore ?? because that's an escaped question mark.
+    private val substituteRegex = "(?<!\\?)(\\?)(?!\\?)".r
+
+    /**
+     * Logger
+     */
+    private val log = new Log(LoggerFactory.getLogger(classOf[PrintableQueryBuilder]))
+
+  }
+
+  trait PrintableQueryBuilder extends UnixTimeInMillisConverterImplicits {
+
+    import PrintableQueryBuilder._
+
+    def build(
+      template: String,
+      settingsProvider: SettingsProvider,
+      params: collection.Seq[Any]): String = {
+      try {
+        def toPrintable(param: Any): String = {
+          @annotation.tailrec
+          def normalize(param: Any): Any = {
+            param match {
+              case null => null
+              case ParameterBinder(v) => normalize(v)
+              case None => null
+              case Some(p) => normalize(p)
+              case p: String => p
+              case p: java.util.Date => p.toSqlTimestamp.toString
+              case p =>
+                param.getClass().getCanonicalName match {
+                  case "org.joda.time.DateTime" =>
+                    param.asInstanceOf[{ def toDate: java.util.Date }].toDate.toSqlTimestamp.toString
+                  case "org.joda.time.LocalDateTime" =>
+                    param.asInstanceOf[{ def toDate: java.util.Date }].toDate.toSqlTimestamp
+                  case "org.joda.time.LocalDate" =>
+                    param.asInstanceOf[{ def toDate: java.util.Date }].toDate.toSqlDate
+                  case "org.joda.time.LocalTime" =>
+                    val millis = param.asInstanceOf[{ def toDateTimeToday: { def getMillis: Long } }].toDateTimeToday.getMillis
+                    new java.sql.Time(millis)
+                  case _ => p
+                }
+            }
+          }
+
+          (normalize(param) match {
+            case null => "null"
+            case result: String =>
+              settingsProvider.loggingSQLAndTime(GlobalSettings.loggingSQLAndTime).maxColumnSize.collect {
+                case maxSize if result.length > maxSize =>
+                  "'" + result.take(maxSize) + "... (" + result.length + ")" + "'"
+              }.getOrElse {
+                "'" + result + "'"
+              }
+            case result => result.toString
+          }).replaceAll("\r", "\\\\r")
+            .replaceAll("\n", "\\\\n")
+        }
+
+        var i = 0
+        @annotation.tailrec
+        def trimSpaces(s: String, i: Int = 0): String = i match {
+          case i if i > 10 => s
+          case i => trimSpaces(s.replaceAll("  ", " "), i + 1)
+        }
+
+        val sqlWithPlaceholders = trimSpaces(SQLTemplateParser.trimComments(template)
+          .replaceAll("[\r\n\t]", " "))
+
+        sqlWithPlaceholders.split('\'').zipWithIndex.map {
+          // Even numbered parts are outside quotes, odd numbered are inside
+          case (target, quoteCount) if (quoteCount % 2 == 0) => {
+            substituteRegex.replaceAllIn(target, m => {
+              i += 1
+              if (params.size >= i) {
+                toPrintable(params(i - 1)).replace("\\", "\\\\").replace("$", "\\$")
+              } else {
+                // In this case, SQLException will be thrown later.
+                // At least, throwing java.lang.IndexOutOfBoundsException here is meaningless.
+                m.source.toString()
+              }
+            })
+          }
+          case (s, quoteCount) if (quoteCount % 2 == 1) => s
+        }.mkString
+
+      } catch {
+        case NonFatal(e) =>
+          log.debug(s"Failed to build a printable SQL statement with ${template}, params: ${params}", e)
+          template
+      }
+    }
+  }
+
 }
 
 /**
@@ -34,14 +132,14 @@ case class StatementExecutor(
   underlying: PreparedStatement,
   template: String,
   connectionAttributes: DBConnectionAttributes,
-  singleParams: Seq[Any] = Nil,
-  tags: Seq[String] = Nil,
+  singleParams: collection.Seq[Any] = Nil,
+  tags: collection.Seq[String] = Nil,
   isBatch: Boolean = false,
   settingsProvider: SettingsProvider = SettingsProvider.default) extends LogSupport with UnixTimeInMillisConverterImplicits with AutoCloseable {
 
   import StatementExecutor._
 
-  private[this] lazy val batchParamsList = new MutableList[Seq[Any]]
+  private[this] lazy val batchParamsList = scala.collection.mutable.ArrayBuffer.empty[collection.Seq[Any]]
 
   initialize()
 
@@ -59,7 +157,7 @@ case class StatementExecutor(
    * Binds parameters to the underlying java.sql.PreparedStatement object.
    * @param params parameters
    */
-  def bindParams(params: Seq[Any]): Unit = {
+  def bindParams(params: collection.Seq[Any]): Unit = {
     val paramsWithIndices = params.map {
       case option: Option[_] => option.orNull[Any]
       case other => other
@@ -109,8 +207,7 @@ case class StatementExecutor(
       case p: java.time.LocalDate =>
         underlying.setDate(i, java.sql.Date.valueOf(p))
       case p: java.time.LocalTime =>
-        val offset = java.time.OffsetDateTime.now.getOffset
-        val millis = p.atDate(StatementExecutor.LocalDateEpoch).toInstant(offset).toEpochMilli
+        val millis = p.atDate(StatementExecutor.LocalDateEpoch).atZone(java.time.ZoneId.systemDefault).toInstant.toEpochMilli
         val time = new java.sql.Time(millis)
         underlying.setTime(i, time)
       case p: java.io.InputStream => underlying.setBinaryStream(i, p)
@@ -139,78 +236,10 @@ case class StatementExecutor(
    * SQL String value
    */
   private[this] lazy val sqlString: String = {
-    val loggingSQLAndTime = settingsProvider.loggingSQLAndTime(GlobalSettings.loggingSQLAndTime)
 
-    def singleSqlString(params: Seq[Any]): String = {
+    def singleSqlString(params: collection.Seq[Any]): String = {
 
-      def toPrintable(param: Any): String = {
-        @annotation.tailrec
-        def normalize(param: Any): Any = {
-          param match {
-            case null => null
-            case ParameterBinder(v) => normalize(v)
-            case None => null
-            case Some(p) => normalize(p)
-            case p: String => p
-            case p: java.util.Date => p.toSqlTimestamp.toString
-            case p =>
-              param.getClass().getCanonicalName match {
-                case "org.joda.time.DateTime" =>
-                  param.asInstanceOf[{ def toDate: java.util.Date }].toDate.toSqlTimestamp.toString
-                case "org.joda.time.LocalDateTime" =>
-                  param.asInstanceOf[{ def toDate: java.util.Date }].toDate.toSqlTimestamp
-                case "org.joda.time.LocalDate" =>
-                  param.asInstanceOf[{ def toDate: java.util.Date }].toDate.toSqlDate
-                case "org.joda.time.LocalTime" =>
-                  val millis = param.asInstanceOf[{ def toDateTimeToday: { def getMillis: Long } }].toDateTimeToday.getMillis
-                  new java.sql.Time(millis)
-                case _ => p
-              }
-          }
-        }
-        (normalize(param) match {
-          case null => "null"
-          case result: String =>
-            loggingSQLAndTime.maxColumnSize.collect {
-              case maxSize if result.length > maxSize =>
-                "'" + result.take(maxSize) + "... (" + result.length + ")" + "'"
-            }.getOrElse {
-              "'" + result + "'"
-            }
-          case result => result.toString
-        }).replaceAll("\r", "\\\\r")
-          .replaceAll("\n", "\\\\n")
-      }
-
-      var i = 0
-      @annotation.tailrec
-      def trimSpaces(s: String, i: Int = 0): String = i match {
-        case i if i > 10 => s
-        case i => trimSpaces(s.replaceAll("  ", " "), i + 1)
-      }
-
-      var isInsideOfText = false
-      val sql = trimSpaces(SQLTemplateParser.trimComments(template)
-        .replaceAll("\r", " ")
-        .replaceAll("\n", " ")
-        .replaceAll("\t", " "))
-        .map { c =>
-          if (c == '\'') {
-            isInsideOfText = !isInsideOfText
-            c
-          } else if (!isInsideOfText && c == '?') {
-            i += 1
-            if (params.size >= i) {
-              toPrintable(params(i - 1))
-            } else {
-              // In this case, SQLException will be thrown later.
-              // At least, throwing java.lang.IndexOutOfBoundsException here is meaningless.
-              c
-            }
-          } else {
-            c
-          }
-        }.mkString
+      val sql = PrintableQueryBuilder.build(template, settingsProvider, params)
 
       try {
         settingsProvider.sqlFormatter(GlobalSettings.sqlFormatter).formatter match {
@@ -227,7 +256,7 @@ case class StatementExecutor(
     }
 
     if (isBatch) {
-      loggingSQLAndTime.maxBatchParamSize.collect {
+      settingsProvider.loggingSQLAndTime(GlobalSettings.loggingSQLAndTime).maxBatchParamSize.collect {
         case maxSize if batchParamsList.size > maxSize =>
           batchParamsList.take(maxSize).map(params => singleSqlString(params)).mkString(";" + eol + "   ") + ";" + eol +
             "   ... (total: " + batchParamsList.size + " times)"

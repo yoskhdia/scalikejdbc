@@ -185,9 +185,9 @@ class BasicUsageSpec extends FlatSpec with Matchers with LoanPattern {
         }
         es.size should equal(2)
 
-        val tr: Traversable[Emp] = DB readOnly { implicit session =>
+        val tr: Iterable[Emp] = DB readOnly { implicit session =>
           SQL("select * from emp_BasicUsageSpec_SQL")
-            .map(rs => Emp(rs.int("id"), rs.string("name"))).traversable.apply()
+            .map(rs => Emp(rs.int("id"), rs.string("name"))).iterable.apply()
         }
 
         {
@@ -338,13 +338,13 @@ class BasicUsageSpec extends FlatSpec with Matchers with LoanPattern {
 
       DB localTx { implicit session =>
 
-        val params1: Seq[Seq[Any]] = (1001 to 2000).map { i => Seq(i, "name" + i) }
+        val params1: collection.Seq[Seq[Any]] = (1001 to 2000).map { i => Seq(i, "name" + i) }
         session.batch("insert into " + tableName + " (id, name) values (?, ?)", params1: _*)
 
-        val params2: Seq[Seq[Any]] = (2001 to 3000).map { i => Seq(i, "name" + i) }
+        val params2: collection.Seq[Seq[Any]] = (2001 to 3000).map { i => Seq(i, "name" + i) }
         SQL("insert into " + tableName + " (id, name) values (?, ?)").batch(params2: _*).apply()
 
-        val params3: Seq[Seq[(Symbol, Any)]] = (3001 to 4000).map { i => Seq('id -> i, 'name -> ("name" + i)) }
+        val params3: collection.Seq[Seq[(Symbol, Any)]] = (3001 to 4000).map { i => Seq('id -> i, 'name -> ("name" + i)) }
         SQL("insert into " + tableName + " (id, name) values ({id}, {name})").batchByName(params3: _*).apply()
 
       }

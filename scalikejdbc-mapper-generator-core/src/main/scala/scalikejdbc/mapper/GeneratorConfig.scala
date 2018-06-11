@@ -18,10 +18,11 @@ case class GeneratorConfig(
   columnNameToFieldName: String => String = GeneratorConfig.columnNameToFieldNameBasic andThen GeneratorConfig.addSuffixIfConflict("Column"),
   returnCollectionType: ReturnCollectionType = ReturnCollectionType.List,
   view: Boolean = false,
-  tableNamesToSkip: Seq[String] = List(),
+  tableNamesToSkip: collection.Seq[String] = List(),
   tableNameToBaseTypes: String => Seq[String] = _ => Nil,
   tableNameToCompanionBaseTypes: String => Seq[String] = _ => Nil,
-  tableNameToSyntaxName: String => String = GeneratorConfig.tableNameToSyntaxNameDefault)
+  tableNameToSyntaxName: String => String = GeneratorConfig.tableNameToSyntaxNameDefault,
+  tableNameToSyntaxVariableName: String => String = GeneratorConfig.tableNameToSyntaxNameDefault)
 
 object GeneratorConfig {
   private def toProperCase(s: String): String = {

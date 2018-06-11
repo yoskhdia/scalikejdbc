@@ -4,7 +4,7 @@ val root = project.in(file(".")).enablePlugins(ScalikejdbcPlugin)
 
 val scalikejdbcVersion = System.getProperty("plugin.version")
 
-crossScalaVersions := List("2.12.4", "2.11.12")
+crossScalaVersions := List("2.12.6", "2.11.12")
 
 scalacOptions ++= Seq("-Xlint", "-language:_", "-deprecation", "-unchecked")
 
@@ -23,11 +23,11 @@ libraryDependencies ++= Seq(
 )
 
 (scalikejdbcCodeGeneratorAll in Compile) := { (_, generatorSettings) =>
-  val idColumn = Column("id", java.sql.Types.INTEGER, true, true)
+  val idColumn = Column("id", java.sql.JDBCType.INTEGER, true, true)
   val columns = List(
     idColumn,
-    Column("name", java.sql.Types.VARCHAR, true, false),
-    Column("updated_at", java.sql.Types.TIMESTAMP, false, false)
+    Column("name", java.sql.JDBCType.VARCHAR, true, false),
+    Column("updated_at", java.sql.JDBCType.TIMESTAMP, false, false)
   )
   val table = Table(
     "Programmers",
