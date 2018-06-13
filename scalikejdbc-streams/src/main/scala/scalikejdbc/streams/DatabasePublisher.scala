@@ -2,7 +2,9 @@ package scalikejdbc.streams
 
 import org.reactivestreams.{ Publisher, Subscriber }
 import scalikejdbc.LogSupport
+import scalikejdbc.streams.commands.ConsumingCommand
 
+import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 /**
@@ -14,6 +16,8 @@ class DatabasePublisher[A] private[streams] (
   private[streams] val settings: DatabasePublisherSettings[A],
   private[streams] val sql: StreamReadySQL[A],
   private[streams] val asyncExecutor: AsyncExecutor) extends Publisher[A] with LogSupport {
+
+  private val defaultRequestSize: Int = sql.fetchSize.getOrElse(DefaultFetchSize)
 
   /**
    * Requests Publisher to start streaming data.
@@ -71,4 +75,22 @@ class DatabasePublisher[A] private[streams] (
     }
   }
 
+  /**
+   * Consume the streaming data and fold left that.
+   */
+  def foldLeft[R](initial: R, batchSize: Int = defaultRequestSize)(f: (A, R) => R): Future[R] = {
+    val handle = (element: A, prevValue: R) => {
+      ConsumingCommand.Continue(f(element, prevValue))
+    }
+    consume(initial, batchSize)(handle)
+  }
+
+  /**
+   * Consume the streaming data.
+   */
+  def consume[R](initial: R, batchSize: Int = defaultRequestSize)(handle: (A, R) => ConsumingCommand[R]): Future[R] = {
+    val subscriber = new BufferedAsyncSubscriber[A, R](batchSize, asyncExecutor)(initial)(handle)
+    subscribe(subscriber)
+    subscriber.future
+  }
 }
